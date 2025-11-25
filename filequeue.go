@@ -520,15 +520,24 @@ func (q *FileQueue) Skip(count int64) error {
 
 	for i := 0; i < int(count); i++ {
 		// check and update queue front index info
-		_, err := q.updateQueueFrontIndex()
+		index, err := q.updateQueueFrontIndex()
 		if err != nil {
 			return err
 		}
-
+		bb, err := q.peek(index)
+		sz := len(bb)
+		q.queueSize -= int64(sz)
+		if q.queueSize < 0 {
+			q.queueSize = 0
+		}
 		if q.IsEmpty() {
-			return nil
+			break
 		}
 	}
+	b := new(bytes.Buffer)
+	binary.Write(b, binary.BigEndian, q.queueSize)
+	bbytes := b.Bytes()
+	copy(q.metaFile.data[16:24], bbytes[:])
 	return nil
 }
 
