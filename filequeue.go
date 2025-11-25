@@ -14,7 +14,7 @@ const (
 	// front index page size
 	defaultFrontPageSize = 1 << 3
 	// meta file page size
-	defaultMetaPageSize = 1<<4 + 1<<3
+	defaultMetaPageSize = (1 << 4) + (1 << 3)
 	// DefaultDataPageSize data file size
 	DefaultDataPageSize = 128 * 1024 * 1024
 
