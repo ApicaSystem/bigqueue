@@ -426,15 +426,6 @@ func (q *FileQueue) Dequeue() (int64, []byte, error) {
 		return -1, nil, err
 	}
 	bb, err := q.peek(index)
-	sz := len(bb)
-	q.queueSize -= int64(sz)
-	if q.queueSize < 0 {
-		q.queueSize = 0
-	}
-	b := new(bytes.Buffer)
-	binary.Write(b, binary.BigEndian, q.queueSize)
-	bbytes := b.Bytes()
-	copy(q.metaFile.data[16:24], bbytes[:])
 	return index, bb, err
 }
 
@@ -520,24 +511,15 @@ func (q *FileQueue) Skip(count int64) error {
 
 	for i := 0; i < int(count); i++ {
 		// check and update queue front index info
-		index, err := q.updateQueueFrontIndex()
+		_, err := q.updateQueueFrontIndex()
 		if err != nil {
 			return err
 		}
-		bb, err := q.peek(index)
-		sz := len(bb)
-		q.queueSize -= int64(sz)
-		if q.queueSize < 0 {
-			q.queueSize = 0
-		}
+
 		if q.IsEmpty() {
-			break
+			return nil
 		}
 	}
-	b := new(bytes.Buffer)
-	binary.Write(b, binary.BigEndian, q.queueSize)
-	bbytes := b.Bytes()
-	copy(q.metaFile.data[16:24], bbytes[:])
 	return nil
 }
 
@@ -616,6 +598,18 @@ func (q *FileQueue) updateQueueFrontIndex() (int64, error) {
 		q.frontFile.data[idx] = b
 
 	}
+
+	// update total bytes in queue and write to meta file
+	bb, _ = q.peek(queueFrontIndex)
+	sz := len(bb)
+	q.queueSize -= int64(sz)
+	if q.queueSize < 0 {
+		q.queueSize = 0
+	}
+	b := new(bytes.Buffer)
+	binary.Write(b, binary.BigEndian, q.queueSize)
+	bbytes := b.Bytes()
+	copy(q.metaFile.data[16:24], bbytes[:])
 
 	return queueFrontIndex, nil
 }
