@@ -14,7 +14,7 @@ const (
 	// front index page size
 	defaultFrontPageSize = 1 << 3
 	// meta file page size
-	defaultMetaPageSize = 1 << 4
+	defaultMetaPageSize = (1 << 4) + (1 << 3)
 	// DefaultDataPageSize data file size
 	DefaultDataPageSize = 128 * 1024 * 1024
 
@@ -71,6 +71,9 @@ type FileQueue struct {
 
 	// head offset of the data page, this is the to be appended data offset
 	headDataItemOffset int64
+
+	// queue size in bytes
+	queueSize int64
 
 	// Protects mmap access during remapping.
 	// use read and write lock
@@ -314,6 +317,11 @@ func (q *FileQueue) Size() int64 {
 	return int64(sz)
 }
 
+// SizeInBytes returns total bytes of data held in queue
+func (q *FileQueue) SizeInBytes() int64 {
+	return q.queueSize
+}
+
 // to calc size by target frontIndex
 func (q *FileQueue) size(frontIndex int64) int64 {
 	sz := q.headIndex - frontIndex
@@ -388,11 +396,13 @@ func (q *FileQueue) Enqueue(data []byte) (int64, error) {
 
 	// update next to the head index
 	q.headIndex = q.headIndex + 1
+	q.queueSize += int64(sz)
 
 	// update meta data
 	b = new(bytes.Buffer)
 	binary.Write(b, binary.BigEndian, q.headIndex)
 	binary.Write(b, binary.BigEndian, q.tailIndex)
+	binary.Write(b, binary.BigEndian, q.queueSize)
 
 	bb = b.Bytes()
 
@@ -589,6 +599,18 @@ func (q *FileQueue) updateQueueFrontIndex() (int64, error) {
 
 	}
 
+	// update total bytes in queue and write to meta file
+	bb, _ = q.peek(queueFrontIndex)
+	sz := len(bb)
+	q.queueSize -= int64(sz)
+	if q.queueSize < 0 {
+		q.queueSize = 0
+	}
+	b := new(bytes.Buffer)
+	binary.Write(b, binary.BigEndian, q.queueSize)
+	bbytes := b.Bytes()
+	copy(q.metaFile.data[16:24], bbytes[:])
+
 	return queueFrontIndex, nil
 }
 
@@ -623,10 +645,12 @@ func (q *FileQueue) initMetaFile() error {
 	}
 
 	q.headIndex = BytesToInt(q.metaFile.data[:8])
-	q.tailIndex = BytesToInt(q.metaFile.data[9:16])
+	q.tailIndex = BytesToInt(q.metaFile.data[8:16])
+	q.queueSize = BytesToInt(q.metaFile.data[16:24])
 
 	Assert(q.headIndex >= 0, "head index can not be negetive number. value is %v", q.headIndex)
 	Assert(q.tailIndex >= 0, "tail index can not be negetive number. value is %v", q.tailIndex)
+	Assert(q.queueSize >= 0, "queue size must be greater than 0. value is %v", q.queueSize)
 	return nil
 }
 
@@ -731,7 +755,7 @@ func (q *FileQueue) Close() error {
 	return nil
 }
 
-//Gc Delete all used data files to free disk space.
+// Gc Delete all used data files to free disk space.
 //
 // BigQueue will persist enqueued data in disk files, these data files will remain even after
 // the data in them has been dequeued later, so your application is responsible to periodically call
