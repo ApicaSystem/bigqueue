@@ -2,7 +2,9 @@ package bigqueue
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -258,6 +260,72 @@ func TestFileQueue_AutoGc(t *testing.T) {
 		dequeue(queue, []byte("hello xiemalin中文"), 500, t)
 
 		time.Sleep(2 * time.Second)
+	})
+}
+
+// autoGCGoroutines counts goroutines running a queue's auto gc loop.
+func autoGCGoroutines() int {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	return strings.Count(string(buf), "bigqueue.(*FileQueue).autoGC.func")
+}
+
+// TestFileQueue_CloseStopsAutoGc checks a closed queue stops garbage collecting:
+// its gc goroutine would otherwise keep deleting page files in the directory,
+// including ones a queue opened later on the same directory is using.
+func TestFileQueue_CloseStopsAutoGc(t *testing.T) {
+	path := Tempfile()
+	clearFiles(path, "testqueue_closegc")
+	defer clearFiles(path, "testqueue_closegc")
+
+	Convey("TestFileQueue_CloseStopsAutoGc", t, func() {
+		before := autoGCGoroutines()
+		var queue = new(FileQueue)
+		err := queue.Open(path, "testqueue_closegc", &Options{
+			DataPageSize:      128,
+			IndexItemsPerPage: 17,
+			AutoGCBySeconds:   1,
+		})
+		So(err, ShouldBeNil)
+		So(autoGCGoroutines(), ShouldEqual, before+1)
+
+		queue.Close()
+
+		deadline := time.Now().Add(2 * time.Second)
+		for autoGCGoroutines() > before && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		So(autoGCGoroutines(), ShouldEqual, before)
+	})
+}
+
+// TestFileQueue_CloseTwice checks a second Close returns instead of waiting on
+// a gc loop that has already stopped.
+func TestFileQueue_CloseTwice(t *testing.T) {
+	path := Tempfile()
+	clearFiles(path, "testqueue_closetwice")
+	defer clearFiles(path, "testqueue_closetwice")
+
+	Convey("TestFileQueue_CloseTwice", t, func() {
+		var queue = new(FileQueue)
+		err := queue.Open(path, "testqueue_closetwice", &Options{
+			DataPageSize:      128,
+			IndexItemsPerPage: 17,
+			AutoGCBySeconds:   1,
+		})
+		So(err, ShouldBeNil)
+		queue.Close()
+
+		done := make(chan struct{})
+		go func() {
+			queue.Close()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("second Close did not return")
+		}
 	})
 }
 
