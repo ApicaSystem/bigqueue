@@ -730,6 +730,7 @@ func (q *FileQueue) Close() error {
 	// to close auto gc if opened
 	if q.autoGCQuit != nil {
 		q.autoGCQuit <- 1
+		q.autoGCQuit = nil
 	}
 
 	q.FreeSubscribe()
@@ -847,6 +848,8 @@ func (q *FileQueue) doLoopSubscribe() {
 }
 
 func (q *FileQueue) autoGC() {
+	// Unbuffered, so Close returns only once the loop has left any running Gc.
+	q.autoGCQuit = make(chan int)
 	ticker := time.NewTicker(time.Second * time.Duration(q.options.AutoGCBySeconds))
 	go func() {
 		for {
