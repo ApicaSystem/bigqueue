@@ -2,6 +2,7 @@ package bigqueue
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"strings"
@@ -740,6 +741,11 @@ func TestFileQueue_PeekRange(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(len(data), ShouldEqual, 2)
 			So(string(data[1]), ShouldEqual, "hello matthew 9")
+
+			data, _, err = queue.PeekRange(3, math.MaxInt64) // offset+count overflows
+			So(err, ShouldBeNil)
+			So(len(data), ShouldEqual, 7)
+			So(string(data[6]), ShouldEqual, "hello matthew 9")
 
 			data, indexs, err = queue.PeekRange(10, 1) // past the end
 			So(err, ShouldBeNil)

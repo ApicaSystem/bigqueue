@@ -511,14 +511,18 @@ func (q *FileQueue) PeekRange(offset, count int64) ([][]byte, []int64, error) {
 	q.lock.RLock()
 	defer q.lock.RUnlock()
 
-	size := q.size(q.frontIndex)
+	// Dequeue and Skip move the front under queueFrontWriteLock, not q.lock,
+	// so read it once: the size and the start must come from the same front.
+	front := q.frontIndex
+	size := q.size(front)
 	if offset < 0 || count <= 0 || offset >= size {
 		return [][]byte{}, []int64{}, nil
 	}
-	if offset+count > size {
+	// Compared this way round, a count near MaxInt64 cannot overflow.
+	if count > size-offset {
 		count = size - offset
 	}
-	return q.peekAll(q.frontIndex+offset, count)
+	return q.peekAll(front+offset, count)
 }
 
 // Skip the target n items to front index
