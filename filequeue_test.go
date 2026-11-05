@@ -2,6 +2,7 @@ package bigqueue
 
 import (
 	"fmt"
+	"math"
 	"runtime"
 	"strconv"
 	"strings"
@@ -699,4 +700,72 @@ func clearFiles(path string, queueName string) {
 	RemoveFiles(path + "/" + queueName + "/" + FrontFileName)
 	RemoveFiles(path + "/" + queueName + "/" + IndexFileName)
 	RemoveFiles(path + "/" + queueName + "/" + MetaFileName)
+}
+
+func TestFileQueue_PeekRange(t *testing.T) {
+	Convey("Test PeekRange", t, func() {
+
+		path := Tempfile()
+		clearFiles(path, "testqueue")
+
+		var queue = new(FileQueue)
+
+		err := queue.Open(path, "testqueue", nil)
+		if err != nil {
+			t.Error(err)
+		}
+		defer queue.Close()
+		defer clearFiles(path, "testqueue")
+		Convey("test PeekRange on empty queue", func() {
+			data, indexs, err := queue.PeekRange(0, 3)
+			So(err, ShouldBeNil)
+			So(data, ShouldBeEmpty)
+			So(indexs, ShouldBeEmpty)
+		})
+
+		Convey("test PeekRange from an offset after the front", func() {
+			for i := 0; i < 10; i++ { // add value
+				_, err := queue.Enqueue([]byte("hello matthew " + strconv.Itoa(i)))
+				So(err, ShouldBeNil)
+			}
+
+			data, indexs, err := queue.PeekRange(3, 4)
+			So(err, ShouldBeNil)
+			So(len(data), ShouldEqual, 4)
+			So(string(data[0]), ShouldEqual, "hello matthew 3")
+			So(string(data[3]), ShouldEqual, "hello matthew 6")
+			So(indexs, ShouldResemble, []int64{3, 4, 5, 6})
+			So(queue.Size(), ShouldEqual, 10)
+
+			data, _, err = queue.PeekRange(8, 5) // clamped to the end
+			So(err, ShouldBeNil)
+			So(len(data), ShouldEqual, 2)
+			So(string(data[1]), ShouldEqual, "hello matthew 9")
+
+			data, _, err = queue.PeekRange(3, math.MaxInt64) // offset+count overflows
+			So(err, ShouldBeNil)
+			So(len(data), ShouldEqual, 7)
+			So(string(data[6]), ShouldEqual, "hello matthew 9")
+
+			data, indexs, err = queue.PeekRange(10, 1) // past the end
+			So(err, ShouldBeNil)
+			So(data, ShouldBeEmpty)
+			So(indexs, ShouldBeEmpty)
+
+			data, _, err = queue.PeekRange(-1, 2)
+			So(err, ShouldBeNil)
+			So(data, ShouldBeEmpty)
+
+			data, _, err = queue.PeekRange(0, 0)
+			So(err, ShouldBeNil)
+			So(data, ShouldBeEmpty)
+
+			So(queue.Skip(2), ShouldBeNil)
+			data, indexs, err = queue.PeekRange(1, 1) // relative to the new front
+			So(err, ShouldBeNil)
+			So(string(data[0]), ShouldEqual, "hello matthew 3")
+			So(indexs, ShouldResemble, []int64{3})
+		})
+
+	})
 }

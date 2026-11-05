@@ -503,6 +503,28 @@ func (q *FileQueue) peekPagination(frontindex int64, size int64, page, pagesize 
 	return result, indexs, nil
 }
 
+// PeekRange retrieves up to count items starting offset items after the front
+// index, without moving it, and returns them with their indexes. The range is
+// clamped to the end of the queue; a range starting at or past the end, or a
+// negative offset or non-positive count, returns no items.
+func (q *FileQueue) PeekRange(offset, count int64) ([][]byte, []int64, error) {
+	q.lock.RLock()
+	defer q.lock.RUnlock()
+
+	// Dequeue and Skip move the front under queueFrontWriteLock, not q.lock,
+	// so read it once: the size and the start must come from the same front.
+	front := q.frontIndex
+	size := q.size(front)
+	if offset < 0 || count <= 0 || offset >= size {
+		return [][]byte{}, []int64{}, nil
+	}
+	// Compared this way round, a count near MaxInt64 cannot overflow.
+	if count > size-offset {
+		count = size - offset
+	}
+	return q.peekAll(front+offset, count)
+}
+
 // Skip the target n items to front index
 func (q *FileQueue) Skip(count int64) error {
 	if q.IsEmpty() {
